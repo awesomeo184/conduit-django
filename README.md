@@ -1,19 +1,92 @@
-# Conduit
+# Realworld example
 
-## Installation
+## Setting up JWT Authentication
 
-1. Install [Python 3.7.2](https://www.python.org/downloads/release/python-372/).
-2. Clone this repository: `git clone git@github.com:howardderekl/conduit-django.git`.
-3. `cd` into `conduit-django`: `cd conduit-django`.
-4. Install [virtualenv](https://packaging.python.org/guides/installing-using-pip-and-virtualenv/#installing-virtualenv).
-5. Create a new virtualenv called "ENV": `virtualenv ENV`.
-6. Set the local virtualenv to "ENV": `source ENV/bin/activate`.
+Django는 즉시 작동하는 세션 기반 인증 시스템을 제공합니다. 여기에는 사용자가 로그인하고 새 계정을 만드는 데 필요한 모든 모델, 보기 및 템플릿이 포함됩니다. 문제는 다음과 같습니다. Django의 인증은
+기존의 HTML 요청-응답 사이클에서만 작동합니다.
 
-If all went well then your command line prompt should now start with `(ENV)`.
+"기존 HTML 요청-응답 사이클에서만 작동한다"라는 것은 무엇을 의미할까요? 이전에는 사용자가 새 계정 만들기 등의 작업을 수행하려고 할 때 웹 브라우저에서 form을 작성했습니다. 그들이 "Submit" 버튼을
+클릭했을 때, 브라우저는 form 입력한 데이터를 포함하는 요청을 서버에 하고, 서버는 그 요청을 처리하고, HTML로 응답하거나 브라우저를 새 페이지로 리디렉션했습니다. 이것을 "full page
+refreshing"이라고 합니다.
 
-7. Install the required packages: `pip install -r requirements.txt`
-8. project should build and run with: `python manage.py runserver`
+장고의 기본 인증 방식이 기존 HTML 요청-응답 사이클에서만 작동한다는 것은 왜 중요할까요? 왜냐하면 우리가 만드려고하는 API의 클라이언트는 이런 사이클을 원하지 않을 것이기 때문입니다.
 
-If your command line prompt does not start with `(Env)` at this point, try running `source ENV/bin/activate` or `cd ../conduit-django`. 
+우리의 클라이언트는 HTML 응답대신 JSON 응답을 기대합니다. JSON을 리턴하면 서버가 결정하는 것이 아니라 클라이언트가 다음에 무엇을 해야 할지 결정하게 할 수 있습니다. 우리는 JSON 요청-응답 사이클을
+사용해서 데이터를 수신하고 처리한 후 응답을 반환하지만, 이 응답은 브라우저의 동작을 제어하지 않습니다. 단지 요청 결과를 알려줄 뿐입니다.
 
-If virtualenv is still not working, visit us in the Thinkster Slack channel so we can help you out.
+다행히 장고 개발팀은 이러한 웹 개발의 새 트렌드를 인식하고 있었기 때문에, 기존 인증 방식이 아닌 커스텀 인증 방식을 선택할 수 있도록 해두었습니다. 덕분에 우리는 결과값을 커스텀하면서도 기존 장고의 중요 기능들을
+계속 사용할 수 있습니다.
+
+우리는 다음과 같은 작업을 할 것입니다.
+
+1. 장고의 기존 User model이 아닌 커스텀 User model을 만듭니다.
+2. HTML이 아닌 JSON을 반환하는 view를 만들겁니다.
+3. HTML을 쓰지 않을 것이기 때문에 장고의 빌트인 login, register 템플릿을 사용할 필요가 없습니다.
+
+장고의 인증 시스템에 대해 자세히 알고 싶다면 [장고 인증 시스템 사용하기](https://docs.djangoproject.com/es/2.1/topics/auth/default/),
+[장고 인증 시스템 커스텀하기](https://docs.djangoproject.com/es/2.1/topics/auth/customizing/) 글을 읽어보세요.
+
+### 세션 기반 인증
+
+앞서 말했듯이 장고는 인증을 위해 세션을 기본으로 사용합니다. 장고에서, 세션은 쿠키로 저장됩니다. 이러한 세션은 일부 빌트인 미들웨어 및 요청 객체와 함께 모든 요청에 대해 사용 가능한 유저 객체가 있음을
+보장합니다.
+
+`request.user`를 통해 유저에 접근할 수 있습니다. 유저가 로그인한 상태라면 `request.user`는 `User` 클래스의 인스턴스를 반환합니다. 로그인하지 않은 상태라면 `AnonymousUser`
+클래스의 객체를 반환합니다. 유저가 로그인을 했든 안했든 User 객체는 항상 존재합니다.
+
+항상 사용가능한 User 객체가 존재한다는 것을 보장하는게 왜 필요할까요?
+`User` 인스턴스에 대해 `request.user.is_authenticated()` 메서드를 호출하면 항상 `True`를 반환합니다.
+`AnonymousUser`에 대해서는 `False`를 반환합니다.
+
+따라서 개발자는
+
+```python
+if request.user is not None and request.user.is_authenticated():
+```
+
+를 호출하는 대신에
+
+```python
+if request.user.is_authenticated():
+```
+
+만 호출하면 됩니다.
+
+우리의 경우, 클라이언트와 서버는 다른 위치에서 실행됩니다. 서버는 `http://localhost:3000/` 에서 실행되고 클라이언트는 `http://localhost:5000`에서 실행됩니다. 브라우저는 이 두
+위치를 서로 다른 도메인으로 간주합니다. 마치 'http://server.com'과 'http://client.com'처럼 말이죠.
+
+외부 도메인이 우리의 쿠키에 접근하는 것은 허용되지 않으므로 우리의 세션을 사용하기 위해 다른 방법을 찾아야 합니다. 왜 허용이 되지 않는지
+궁금하다면 [CORS](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS)와 [CSRF](https://docs.djangoproject.com/en/2.1/ref/csrf/)에
+대해 공부해보세요.
+
+### 토큰 기반 인증
+
+세션 기반 인증의 대안으로 가장 일반적인 것은 토큰 기반 인증입니다. 우리는 우리 어플리케이션의 보안을 위해
+"특정한 형식의 토큰 기반 인증"을 사용할 것입니다.
+
+토큰 기반 인증에서는, 서버는 성공적인 로그인 요청을 보낸 유저에게 토큰을 제공합니다. 이 토큰은 로그인 유저마다 고유합니다. 또한 DB에 유저의 ID와 함께 저장됩니다. 클라이언트는 미래의 요청에도 토큰이 있다면
+서버가 자신을 식별해줄 수 있음을 기대합니다.
+
+이런 요청이 들어오면 서버는 DB에 토큰을 저장하고 있는 테이블을 살펴봅니다. 매칭되는 토큰을 찾으면 유저는 인증이 완료됩니다. 토큰은 쿠키가 아니라 데이터베이스에 저장된다는 것을 기억하세요.
+
+토큰을 저장할 때는 토큰의 유효기간도 저장할 수 있습니다. 이 예제에서는 유효기간이 만료된 토큰을 통과시키지 않도록 해야합니다. 만약 토큰이 유효하지 않다면 데이터베이스에서 이를 삭제하고 유저에게 다시 로그인을
+하도록 요청해야 합니다.
+
+### JSON Web Tokens
+
+JSON Web Tokens(JWT)는 두 당사자 간에 정보를 안전하게 전송하는 컴팩트하고 자체적인 방법을 정의하는 개방형 표준입니다. 이전에 언급한 "특정한 형식의 토큰 기반 인증"이라는 것은 바로 이 JWT를
+의미하는 것이었습니다.
+
+JWT가 무엇이고 어떻게 동작하는지 알고 싶다면 [이 글](https://datatracker.ietf.org/doc/html/rfc7519)을 참조하세요.
+
+### 왜 JWT가 다른 일반 토큰보다 나은가?
+
+JWT를 이용해 얻을 수 있는 이점들은 다음과 같은 것들이 있습니다.
+
+1. JWT는 개방형 표준입니다. 이는 JWT의 모든 구현이 상당히 유사해야 한다는 것을 의미하며, 이는 다른 언어와 기술로 작업할 때 이점이 된다. 일반 토큰은 보다 자유 형태이므로 개발자가 토큰을 최적으로
+   구현하는 방법을 결정할 수 있습니다.
+2. JWT는 사용자에 대한 모든 정보를 포함할 수 있습니다.
+3. Libraries handle the heavy lifting here. Rolling out your own authentication is dangerous, so we leave the important stuff to battle-tested libraries that we can trust.(?)
+
+### User 모델 만들기
+
